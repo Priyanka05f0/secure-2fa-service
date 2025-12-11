@@ -1,0 +1,6 @@
+__pycache__/
+venv/
+*.env
+student_private.pem
+instructor_public.pem
+data/
