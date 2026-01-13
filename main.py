@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Body
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import base64
 import os
@@ -11,22 +11,21 @@ import pyotp
 app = FastAPI()
 
 # --- Configuration ---
-DATA_DIR = "data"
-# In Docker (later), this might be /data/seed.txt, but for now we use local folder
+DATA_DIR = "/data"
 SEED_FILE = os.path.join(DATA_DIR, "seed.txt")
 PRIVATE_KEY_FILE = "student_private.pem"
 
 # Ensure data directory exists
 os.makedirs(DATA_DIR, exist_ok=True)
 
-# --- Pydantic Models for Input Validation ---
+# --- Pydantic Models ---
 class DecryptRequest(BaseModel):
     encrypted_seed: str
 
 class VerifyRequest(BaseModel):
     code: str
 
-# --- Helper Function: Load Seed ---
+# --- Helper Function ---
 def load_seed():
     if not os.path.exists(SEED_FILE):
         return None
@@ -37,20 +36,16 @@ def load_seed():
 @app.post("/decrypt-seed")
 def decrypt_seed(request: DecryptRequest):
     try:
-        # 1. Load Private Key
         if not os.path.exists(PRIVATE_KEY_FILE):
-            raise HTTPException(status_code=500, detail="Private key not found on server")
+            raise HTTPException(status_code=500, detail="Private key not found")
             
         with open(PRIVATE_KEY_FILE, "rb") as key_file:
             private_key = serialization.load_pem_private_key(
-                key_file.read(),
-                password=None
+                key_file.read(), password=None
             )
 
-        # 2. Decode Base64 input
         encrypted_bytes = base64.b64decode(request.encrypted_seed)
 
-        # 3. Decrypt using RSA-OAEP
         decrypted_bytes = private_key.decrypt(
             encrypted_bytes,
             padding.OAEP(
@@ -62,21 +57,16 @@ def decrypt_seed(request: DecryptRequest):
         
         decrypted_seed = decrypted_bytes.decode('utf-8')
 
-        # 4. Validate (Must be 64-char hex)
         if len(decrypted_seed) != 64 or not re.fullmatch(r'^[0-9a-fA-F]+$', decrypted_seed):
-             raise HTTPException(status_code=500, detail="Decryption produced invalid seed format")
+             raise HTTPException(status_code=500, detail="Invalid seed format")
 
-        # 5. Save to File
         with open(SEED_FILE, "w") as f:
             f.write(decrypted_seed)
 
         return {"status": "ok"}
 
-    except ValueError:
-        raise HTTPException(status_code=500, detail="Invalid base64 input")
     except Exception as e:
-        # Catch-all for decryption failures
-        raise HTTPException(status_code=500, detail=f"Decryption failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # --- Endpoint 2: Generate TOTP ---
 @app.get("/generate-2fa")
@@ -86,23 +76,15 @@ def generate_2fa():
         raise HTTPException(status_code=500, detail="Seed not decrypted yet")
 
     try:
-        # Convert hex seed to base32 for pyotp
         seed_bytes = bytes.fromhex(seed)
         base32_seed = base64.b32encode(seed_bytes).decode('utf-8')
-        
-        # Generate code
         totp = pyotp.TOTP(base32_seed)
-        code = totp.now()
-        
-        # Calculate remaining validity time (30s window)
-        remaining_seconds = 30 - int(time.time() % 30)
-        
         return {
-            "code": code,
-            "valid_for": remaining_seconds
+            "code": totp.now(),
+            "valid_for": 30 - int(time.time() % 30)
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Generation failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # --- Endpoint 3: Verify TOTP ---
 @app.post("/verify-2fa")
@@ -117,17 +99,7 @@ def verify_2fa(request: VerifyRequest):
     try:
         seed_bytes = bytes.fromhex(seed)
         base32_seed = base64.b32encode(seed_bytes).decode('utf-8')
-        
         totp = pyotp.TOTP(base32_seed)
-        # Verify with +/- 1 period tolerance (30s)
-        is_valid = totp.verify(request.code, valid_window=1)
-        
-        return {"valid": is_valid}
-        
+        return {"valid": totp.verify(request.code, valid_window=1)}
     except Exception as e:
-         raise HTTPException(status_code=500, detail=f"Verification process failed: {str(e)}")
-
-# --- Run Server (Only for debugging directly) ---
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+         raise HTTPException(status_code=500, detail=str(e))
