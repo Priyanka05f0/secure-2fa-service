@@ -26,7 +26,7 @@ RUN sed -i 's/\r$//' /app/start.sh && chmod +x /app/start.sh
 RUN mkdir -p /data /cron
 
 # 7. Expose the port
-EXPOSE 8080
+EXPOSE 8000
 
 # 8. Start the container
-CMD ["/app/start.sh"]
+CMD ["bash", "start.sh"]

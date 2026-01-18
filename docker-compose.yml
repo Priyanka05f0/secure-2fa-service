@@ -1,10 +1,12 @@
-version: '3.8'
 services:
   secure-2fa:
     build: .
     ports:
-      - "8080:8080"
+      - "8000:8000"
     volumes:
+      - .:/app
       - ./data_volume:/data
       - ./cron_volume:/cron
+    environment:
+      - PRIVATE_KEY_PATH=/app/private_key.pem
     restart: always
