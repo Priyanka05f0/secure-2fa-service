@@ -1,6 +1,14 @@
+# Python
 __pycache__/
 venv/
+
+# Environment
 *.env
+
+# Secrets
 student_private.pem
-instructor_public.pem
+
+# Runtime / Docker volumes
 data/
+data_volume/
+cron_volume/
